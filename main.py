@@ -4,6 +4,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+import re
 import base64
 import time
 import schedule
@@ -11,13 +12,15 @@ import sys
 import itertools
 from config import PREFECT_USER, PREFECT_PASS, PREFECT_URL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
+# Config
+MINUTOS_UMBRAL = 40  # solo notificar si la duración supera este valor
+
 # WebDriver setup
 service = Service("./chromedriver.exe")
 options = webdriver.ChromeOptions()
 options.add_argument('--disable-dev-shm-usage')
 options.add_argument('--no-sandbox')
-#options.add_argument('--headless') #esto hace que no se muestre el navegador :p cambiar en deploy
-
+# options.add_argument('--headless')  # descomentar en deploy pa ocultar navegador
 
 credenciales = f"{PREFECT_USER}:{PREFECT_PASS}"
 auth_base64 = base64.b64encode(credenciales.encode()).decode()
@@ -31,8 +34,8 @@ def enviar_telegram(mensaje):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     data = {
         "chat_id": TELEGRAM_CHAT_ID,
-        "text": mensaje,
-        "parse_mode": "Markdown"
+        "text": mensaje
+        # sin parse_mode para evitar errores de formato
     }
 
     try:
@@ -43,6 +46,7 @@ def enviar_telegram(mensaje):
             print("❌ Error Telegram:", response.text)
     except Exception as e:
         print("❌ Excepción al enviar Telegram:", str(e))
+
 
 def setup_driver():
     driver = webdriver.Chrome(service=service, options=options)
@@ -97,8 +101,7 @@ def realizar_retry(driver, alias_element):
 
     try:
         modal_retry_btn = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((
-                By.XPATH,
+            EC.element_to_be_clickable((By.XPATH,
                 "//div[contains(@class, 'p-modal__footer')]//button[contains(@class, 'p-button--primary') and .//div[text()[contains(., 'Retry')]]]"
             ))
         )
@@ -164,7 +167,14 @@ def procesar_estado(driver, estado):
                 except:
                     duracion = "Duración no disponible"
 
-                print(f"🔹 Flujo: {nombre_flujo} > {alias_text} ({duracion})")
+                mensaje = f"👨‍🦲 El agentesh: Flujo: {nombre_flujo} > {alias_text} ({duracion})"
+                print(mensaje)
+
+                if estado == "running":
+                    match = re.search(r"(\d+)m", duracion)
+                    minutos = int(match.group(1)) if match else 0
+                    if minutos >= MINUTOS_UMBRAL:
+                        enviar_telegram(mensaje)
 
                 if estado == "failed":
                     print("🔁 Intentando retry del flujo fallido...")
@@ -195,8 +205,8 @@ def verificar_estado_tareas():
 # Ejecutar una vez
 verificar_estado_tareas()
 
-# Ejecutar cada 5 minutos
-schedule.every(5).minutes.do(verificar_estado_tareas)
+# Ejecutar cada 30 minutos
+schedule.every(30).minutes.do(verificar_estado_tareas)
 
 try:
     while True:
