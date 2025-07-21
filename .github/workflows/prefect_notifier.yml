@@ -22,13 +22,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Set environment variables
-        run: |
-          echo "PREFECT_USER=${{ secrets.PREFECT_USER }}" >> $GITHUB_ENV
-          echo "PREFECT_PASS=${{ secrets.PREFECT_PASS }}" >> $GITHUB_ENV
-          echo "PREFECT_URL=${{ secrets.PREFECT_URL }}" >> $GITHUB_ENV
-          echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}" >> $GITHUB_ENV
-          echo "TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }}" >> $GITHUB_ENV
-
       - name: Run Python script
+        env:
+          PREFECT_USER: ${{ secrets.PREFECT_USER }}
+          PREFECT_PASS: ${{ secrets.PREFECT_PASS }}
+          PREFECT_URL: ${{ secrets.PREFECT_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
