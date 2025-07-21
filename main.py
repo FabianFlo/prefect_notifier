@@ -4,10 +4,10 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager  # ✅ auto-instalador
 import re
 import base64
 import time
-import schedule
 import sys
 import itertools
 from config import PREFECT_USER, PREFECT_PASS, PREFECT_URL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
@@ -16,11 +16,10 @@ from config import PREFECT_USER, PREFECT_PASS, PREFECT_URL, TELEGRAM_BOT_TOKEN, 
 MINUTOS_UMBRAL = 40  # solo notificar si la duración supera este valor
 
 # WebDriver setup
-service = Service("./chromedriver.exe")
 options = webdriver.ChromeOptions()
 options.add_argument('--disable-dev-shm-usage')
 options.add_argument('--no-sandbox')
-# options.add_argument('--headless')  # descomentar en deploy pa ocultar navegador
+options.add_argument('--headless')  # ✅ activado en deploy para evitar mostrar navegador
 
 credenciales = f"{PREFECT_USER}:{PREFECT_PASS}"
 auth_base64 = base64.b64encode(credenciales.encode()).decode()
@@ -35,7 +34,6 @@ def enviar_telegram(mensaje):
     data = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": mensaje
-        # sin parse_mode para evitar errores de formato
     }
 
     try:
@@ -49,6 +47,7 @@ def enviar_telegram(mensaje):
 
 
 def setup_driver():
+    service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
     driver.execute_cdp_cmd("Network.enable", {})
     driver.execute_cdp_cmd("Network.setExtraHTTPHeaders", {
@@ -57,17 +56,6 @@ def setup_driver():
         }
     })
     return driver
-
-
-def mostrar_spinner(segundos):
-    spinner = itertools.cycle(['|', '/', '-', '\\'])
-    fin = time.time() + segundos
-    while time.time() < fin:
-        restante = int(fin - time.time())
-        sys.stdout.write(f"\r⏳ Esperando {restante:2d}s {next(spinner)}")
-        sys.stdout.flush()
-        time.sleep(0.2)
-    print("\r✅ Tiempo de espera completado.        ")
 
 
 def contar_tareas_por_estado(driver):
@@ -167,7 +155,7 @@ def procesar_estado(driver, estado):
                 except:
                     duracion = "Duración no disponible"
 
-                mensaje = f"👨‍🦲 El agentesh: Flujo: {nombre_flujo} > {alias_text} ({duracion})"
+                mensaje = f"Flujo: {nombre_flujo} > {alias_text} ({duracion})"
                 print(mensaje)
 
                 if estado == "running":
@@ -196,21 +184,11 @@ def verificar_estado_tareas():
             if valor >= 1:
                 print(f"\n➡ Entrando al detalle de: {estado.upper()}")
                 procesar_estado(driver, estado)
-        mostrar_spinner(10)
     except Exception as e:
         print("❌ Error general:", str(e))
-    driver.quit()
+    finally:
+        driver.quit()
 
 
-# Ejecutar una vez
-verificar_estado_tareas()
-
-# Ejecutar cada 30 minutos
-schedule.every(30).minutes.do(verificar_estado_tareas)
-
-try:
-    while True:
-        schedule.run_pending()
-        time.sleep(1)
-except KeyboardInterrupt:
-    print("\n🛑 Ejecución interrumpida por el usuario.")
+if __name__ == "__main__":
+    verificar_estado_tareas()
