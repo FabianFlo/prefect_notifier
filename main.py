@@ -1,3 +1,4 @@
+import requests
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
@@ -8,7 +9,7 @@ import time
 import schedule
 import sys
 import itertools
-from config import PREFECT_USER, PREFECT_PASS, PREFECT_URL
+from config import PREFECT_USER, PREFECT_PASS, PREFECT_URL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
 # WebDriver setup
 service = Service("./chromedriver.exe")
@@ -21,6 +22,27 @@ options.add_argument('--no-sandbox')
 credenciales = f"{PREFECT_USER}:{PREFECT_PASS}"
 auth_base64 = base64.b64encode(credenciales.encode()).decode()
 
+
+def enviar_telegram(mensaje):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("⚠️ TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados")
+        return
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    data = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": mensaje,
+        "parse_mode": "Markdown"
+    }
+
+    try:
+        response = requests.post(url, data=data)
+        if response.status_code == 200:
+            print("✅ Mensaje enviado al grupo Telegram")
+        else:
+            print("❌ Error Telegram:", response.text)
+    except Exception as e:
+        print("❌ Excepción al enviar Telegram:", str(e))
 
 def setup_driver():
     driver = webdriver.Chrome(service=service, options=options)
