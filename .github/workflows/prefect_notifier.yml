@@ -1,4 +1,4 @@
-name: Prefect Notifier CronJob
+name: Prefect Notifier
 
 on:
   schedule:
