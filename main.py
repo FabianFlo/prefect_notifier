@@ -1,25 +1,26 @@
+import os
+import json
 import requests
+import base64
+import re
+import time
+from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager  # ✅ auto-instalador
-import re
-import base64
-import time
-import sys
-import itertools
+from webdriver_manager.chrome import ChromeDriverManager
 from config import PREFECT_USER, PREFECT_PASS, PREFECT_URL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
-# Config
+# Configuración
 MINUTOS_UMBRAL = 40  # solo notificar si la duración supera este valor
 
 # WebDriver setup
 options = webdriver.ChromeOptions()
 options.add_argument('--disable-dev-shm-usage')
 options.add_argument('--no-sandbox')
-options.add_argument('--headless')  # ✅ activado en deploy para evitar mostrar navegador
+options.add_argument('--headless')  # ✅ oculto para uso en cron
 
 credenciales = f"{PREFECT_USER}:{PREFECT_PASS}"
 auth_base64 = base64.b64encode(credenciales.encode()).decode()
@@ -173,6 +174,33 @@ def procesar_estado(driver, estado):
                 print(f"  ⚠ Error leyendo tarjeta: {inner_e}")
 
 
+def registrar_estado_por_hora(failed, running, scheduled):
+    resumen_path = "resumen/resumen.json"
+    hora_actual = datetime.now().strftime("%H:%M")
+
+    nuevo_detalle = {
+        "hora": hora_actual,
+        "failed": failed,
+        "running": running,
+        "scheduled": scheduled
+    }
+
+    if os.path.exists(resumen_path):
+        with open(resumen_path, "r") as f:
+            resumen = json.load(f)
+    else:
+        resumen = {"ejecuciones": 0, "fallos": 0, "detalle": []}
+
+    resumen["ejecuciones"] += 1
+    resumen["fallos"] += failed
+    resumen["detalle"].append(nuevo_detalle)
+
+    with open(resumen_path, "w") as f:
+        json.dump(resumen, f, indent=2)
+
+    print("📝 Estado registrado en resumen.json")
+
+
 def verificar_estado_tareas():
     driver = setup_driver()
     driver.get(PREFECT_URL)
@@ -180,10 +208,19 @@ def verificar_estado_tareas():
 
     try:
         resultados = contar_tareas_por_estado(driver)
+
+        # Registrar resumen por hora
+        registrar_estado_por_hora(
+            failed=resultados.get("failed", 0),
+            running=resultados.get("running", 0),
+            scheduled=resultados.get("scheduled", 0)
+        )
+
         for estado, valor in resultados.items():
             if valor >= 1:
                 print(f"\n➡ Entrando al detalle de: {estado.upper()}")
                 procesar_estado(driver, estado)
+
     except Exception as e:
         print("❌ Error general:", str(e))
     finally:
