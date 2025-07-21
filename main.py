@@ -13,7 +13,7 @@ import itertools
 from config import PREFECT_USER, PREFECT_PASS, PREFECT_URL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
 # Config
-MINUTOS_UMBRAL = 1  # solo notificar si la duración supera este valor
+MINUTOS_UMBRAL = 40  # solo notificar si la duración supera este valor
 
 # WebDriver setup
 options = webdriver.ChromeOptions()
