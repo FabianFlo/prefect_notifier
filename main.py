@@ -32,7 +32,6 @@ def mostrar_spinner(segundos):
 def verificar_estado_tareas():
     driver = webdriver.Chrome(service=service, options=options)
 
-    # Agregar encabezado Authorization
     driver.execute_cdp_cmd("Network.enable", {})
     driver.execute_cdp_cmd("Network.setExtraHTTPHeaders", {
         "headers": {
@@ -96,9 +95,56 @@ def verificar_estado_tareas():
                         for tarjeta in tarjetas:
                             try:
                                 nombre_flujo = tarjeta.find_element(By.CLASS_NAME, "flow-run-bread-crumbs__flow-link").text.strip()
-                                alias = tarjeta.find_element(By.CLASS_NAME, "flow-run-bread-crumbs__flow-run-link").text.strip()
-                                duracion = tarjeta.find_element(By.CLASS_NAME, "duration-icon-text").text.strip()
-                                print(f"🔹 Flujo: {nombre_flujo} > {alias} ({duracion})")
+                                alias_element = tarjeta.find_element(By.CLASS_NAME, "flow-run-bread-crumbs__flow-run-link")
+                                alias_text = alias_element.text.strip()
+
+                                try:
+                                    duracion = tarjeta.find_element(By.CLASS_NAME, "duration-icon-text").text.strip()
+                                except:
+                                    duracion = "Duración no disponible"
+
+                                print(f"🔹 Flujo: {nombre_flujo} > {alias_text} ({duracion})")
+
+                                if estado == "failed":
+                                    print("🔁 Intentando retry del flujo fallido...")
+                                    alias_element.click()
+
+                                    WebDriverWait(driver, 15).until(EC.url_contains("/flow-run/"))
+                                    print("✅ Página de detalle cargada.")
+
+                                    retry_btn = WebDriverWait(driver, 15).until(
+                                        EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Retry')]"))
+                                    )
+                                    time.sleep(1)
+                                    retry_btn.click()
+                                    print("🟡 Se hizo clic en Retry principal")
+
+                                    # Esperar al modal y confirmar Retry (actualizado)
+                                    try:
+                                        modal_retry_btn = WebDriverWait(driver, 10).until(
+                                            EC.element_to_be_clickable((
+                                                By.XPATH,
+                                                "//div[contains(@class, 'p-modal__footer')]//button[contains(@class, 'p-button--primary') and .//div[text()[contains(., 'Retry')]]]"
+                                            ))
+                                        )
+                                        time.sleep(1)
+                                        modal_retry_btn.click()
+                                        print("✅ Retry confirmado en el modal.")
+                                    except Exception as modal_e:
+                                        print("❌ No se pudo confirmar Retry en el modal:", str(modal_e))
+
+                                    # Volver al dashboard
+                                    try:
+                                        dashboard_btn = WebDriverWait(driver, 10).until(
+                                            EC.element_to_be_clickable((By.CSS_SELECTOR, 'a.p-context-nav-item[href="/dashboard"]'))
+                                        )
+                                        dashboard_btn.click()
+                                        WebDriverWait(driver, 10).until(EC.url_contains("/dashboard"))
+                                        print("↩ Volviendo al dashboard.")
+                                        time.sleep(3)
+                                    except:
+                                        print("⚠ No se pudo volver al dashboard.")
+
                             except Exception as inner_e:
                                 print(f"  ⚠ Error leyendo tarjeta: {inner_e}")
 
