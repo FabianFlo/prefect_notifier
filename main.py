@@ -128,8 +128,10 @@ def procesar_estado(driver, estado):
         print("⚠ No se encontraron secciones.")
         return False
 
-    for idx, seccion in enumerate(secciones, 1):
+    for idx, _ in enumerate(secciones, 1):
         try:
+            secciones_actualizadas = driver.find_elements(By.CLASS_NAME, "p-accordion__section")
+            seccion = secciones_actualizadas[idx - 1]  # índice base 0
             boton = seccion.find_element(By.TAG_NAME, "button")
             boton.click()
             print(f"🔽 Sección {idx} expandida")
@@ -150,49 +152,58 @@ def procesar_estado(driver, estado):
             print(f"⚠ Sección {idx} sin tarjetas luego del wait.")
             continue
 
-        for tarjeta in tarjetas:
-            try:
-                nombre_flujo = tarjeta.find_element(By.CLASS_NAME, "flow-run-bread-crumbs__flow-link").text.strip()
-                alias_element = tarjeta.find_element(By.CLASS_NAME, "flow-run-bread-crumbs__flow-run-link")
-                alias_text = alias_element.text.strip()
-
+        for idx_t in range(len(tarjetas)):
+            for intento in range(2):  # 1 intento + 1 retry por stale element
                 try:
-                    duracion = tarjeta.find_element(By.CLASS_NAME, "duration-icon-text").text.strip()
-                except:
-                    duracion = "Duración no disponible"
+                    secciones_actualizadas = driver.find_elements(By.CLASS_NAME, "p-accordion__section")
+                    seccion = secciones_actualizadas[idx - 1]
+                    tarjetas_actualizadas = seccion.find_elements(By.CLASS_NAME, "state-list-item__content")
+                    tarjeta = tarjetas_actualizadas[idx_t]
 
-                mensaje = f"Flujo: {nombre_flujo} > {alias_text} ({duracion})"
-                print(mensaje)
+                    nombre_flujo = tarjeta.find_element(By.CLASS_NAME, "flow-run-bread-crumbs__flow-link").text.strip()
+                    alias_element = tarjeta.find_element(By.CLASS_NAME, "flow-run-bread-crumbs__flow-run-link")
+                    alias_text = alias_element.text.strip()
 
-                # if estado == "running":
-                #     match = re.search(r"(\d+)m", duracion)
-                #     minutos = int(match.group(1)) if match else 0
-                #     if minutos >= MINUTOS_UMBRAL:
-                #         enviar_telegram(mensaje)
-                #         registro_firebase = True  # ✅ Solo si pasa el umbral
+                    try:
+                        bloque_duracion = tarjeta.find_element(By.CLASS_NAME, "duration-icon-text")
+                        duracion = bloque_duracion.find_element(By.CLASS_NAME, "p-icon-text__label").text.strip()
+                    except:
+                        duracion = "Duración no disponible"
 
-# esto hace que siempre escriba desactivar cuando se debuge
-                if estado == "running":
-                    # Si hay duración, igual extraerla (opcional para logging)
-                    match = re.search(r"(\d+)m", duracion)
-                    minutos = int(match.group(1)) if match else 0
+                    mensaje = f"Flujo: {nombre_flujo} > {alias_text} ({duracion})"
+                    print(mensaje)
 
-                    enviar_telegram(mensaje)  # aún puedes comentar esto si no deseas notificación ahora
-                    registro_firebase = True  # ✅ Siempre registrar si hay running, sin importar duración
+                    # if estado == "running":
+                    #     match = re.search(r"(\d+)m", duracion)
+                    #     minutos = int(match.group(1)) if match else 0
+                    #     if minutos >= MINUTOS_UMBRAL:
+                    #         enviar_telegram(mensaje)
+                    #         registro_firebase = True  # ✅ Solo si pasa el umbral
 
-                if estado == "failed":
-                    print("🔁 Intentando retry del flujo fallido...")
-                    realizar_retry(driver, alias_element)
-                    volver_al_dashboard(driver)
-                    registro_firebase = True
+                    # esto hace que siempre escriba desactivar cuando se debuge
+                    if estado == "running":
+                        # Si hay duración, igual extraerla (opcional para logging)
+                        match = re.search(r"(\d+)m", duracion)
+                        minutos = int(match.group(1)) if match else 0
 
-                # future: agregar casos para estado == "late"
+                        enviar_telegram(mensaje)  # aún puedes comentar esto si no deseas notificación ahora
+                        registro_firebase = True  # ✅ Siempre registrar si hay running, sin importar duración
 
-            except Exception as inner_e:
-                print(f"  ⚠ Error leyendo tarjeta: {inner_e}")
+                    if estado == "failed":
+                        print("🔁 Intentando retry del flujo fallido...")
+                        realizar_retry(driver, alias_element)
+                        volver_al_dashboard(driver)
+                        registro_firebase = True
+
+                    # future: agregar casos para estado == "late"
+
+                    break  # si todo fue bien, salimos del retry
+                except Exception as inner_e:
+                    print(f"  ⚠ Error leyendo tarjeta (intento {intento + 1}): {inner_e}")
+                    if intento == 1:
+                        continue  # último intento, ya no se reintenta
 
     return registro_firebase
-
 
 def verificar_estado_tareas():
     driver = setup_driver()
@@ -225,8 +236,6 @@ def verificar_estado_tareas():
         print("❌ Error general:", str(e))
     finally:
         driver.quit()
-
-
 
 if __name__ == "__main__":
     verificar_estado_tareas()

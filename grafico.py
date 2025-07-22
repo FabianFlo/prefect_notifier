@@ -27,68 +27,67 @@ def enviar_imagen_telegram(imagen_path, mensaje="📊 Reporte diario de flujos")
         else:
             print("❌ Error al enviar imagen:", response.text)
 
-def generar_grafico_resumen():
-    resumen_path = "resumen/resumen.json"
+def generar_grafico_resumen_firebase():
+    resumenes_ref = db.collection("resumenes")
+    docs = resumenes_ref.stream()
 
-    with open(resumen_path, "r") as file:
-        json_data = json.load(file)
+    data = []
+    for doc in docs:
+        item = doc.to_dict()
+        item_id = doc.id
+        if item.get("test", False):
+            continue  # Ignorar si es test
+        item["hora"] = item.get("hora", item_id)  # Si no hay campo hora, usar doc.id
+        data.append(item)
 
-    ejecuciones = json_data.get("ejecuciones", 0)
-    fallos = json_data.get("fallos", 0)
-    data = json_data.get("detalle", [])
+    if not data:
+        print("⚠️ No hay datos válidos en Firebase para graficar.")
+        return
+
+    # Ordenar por hora
+    data.sort(key=lambda x: x["hora"])
 
     horas = [item["hora"] for item in data]
-    failed = [max(0, item["failed"]) for item in data]
-    running = [max(0, item["running"]) for item in data]
-    scheduled = [max(0, item["scheduled"]) for item in data]
+    failed = [max(0, item.get("failed", 0)) for item in data]
+    running = [max(0, item.get("running", 0)) for item in data]
+    scheduled = [max(0, item.get("scheduled", 0)) for item in data]
+
+    fallos = sum(failed)
 
     plt.figure(figsize=(18, 7))
 
-    # Líneas principales
     plt.plot(horas, failed, label="Failed", marker='o', color='red', linewidth=2, alpha=0.9)
-    plt.plot(horas, running, label="Running", marker='o', color='orange', linewidth=2, alpha=0.7)
-    plt.plot(horas, scheduled, label="Scheduled", marker='o', color='green', linewidth=2, alpha=0.7)
+    plt.plot(horas, running, label="Running", marker='o', color='blue', linewidth=2, alpha=0.7)
+    plt.plot(horas, scheduled, label="Scheduled", marker='o', color='orange', linewidth=2, alpha=0.7)
 
-    # Sombreado
     plt.fill_between(horas, failed, color='red', alpha=0.05)
-    plt.fill_between(horas, running, color='orange', alpha=0.05)
-    plt.fill_between(horas, scheduled, color='green', alpha=0.05)
+    plt.fill_between(horas, running, color='blue', alpha=0.05)
+    plt.fill_between(horas, scheduled, color='orange', alpha=0.05)
 
-    # Marcar valores de fallos
     for i, val in enumerate(failed):
         if val > 0:
             plt.scatter(horas[i], val, color='darkred', s=60, zorder=5)
 
-    # Etiquetas X más espaciadas
     plt.xticks(ticks=range(0, len(horas), 2), labels=[horas[i] for i in range(0, len(horas), 2)], rotation=45)
 
-    # Eje Y fijo desde 0 hasta el máximo valor + margen
     todos = failed + running + scheduled
     limite_y_max = max(todos) + 5 if todos else 10
     plt.ylim(bottom=0, top=limite_y_max)
 
-    # Título
-    plt.title(f"Resumen diario de Prefect\nEjecuciones: {ejecuciones} | Fallos de ejecución: {fallos}", fontsize=14)
+    plt.title(f"Resumen diario de Prefect", fontsize=14)
     plt.xlabel("Hora", fontsize=12)
     plt.ylabel("Cantidad", fontsize=12)
     plt.grid(True)
     plt.legend()
     plt.tight_layout()
 
-    # Guardar y enviar imagen
     output_path = "reporte_diario.png"
     plt.savefig(output_path)
-    print(f"📊 Gráfico guardado en {output_path}")
+    print(f"📊 Gráfico generado desde Firebase y guardado en {output_path}")
 
-    mensaje = f"📊 Resumen diario de Prefect\n🟢 Ejecuciones: {ejecuciones} | 🔴 Fallos: {fallos}"
+    mensaje = f"📊 Resumen diario de Prefect"
     enviar_imagen_telegram(output_path, mensaje=mensaje)
     os.remove(output_path)
 
-    # Respaldar y eliminar resumen.json
-    fecha_hoy = datetime.now().strftime("%Y-%m-%d")
-    respaldo_path = f"resumen/resumen_{fecha_hoy}.json"
-    os.rename(resumen_path, respaldo_path)
-    print(f"🗂️ Resumen respaldado como {resumen_path} → {respaldo_path}")
-
 if __name__ == "__main__":
-    generar_grafico_resumen()
+    generar_grafico_resumen_firebase()
