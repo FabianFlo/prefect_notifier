@@ -1,6 +1,7 @@
 import json
 import os
 from datetime import datetime
+import pytz
 import firebase_admin
 from firebase_admin import credentials, firestore
 
@@ -14,7 +15,6 @@ def init_firebase():
         if not cred_json:
             raise Exception("FIREBASE_CREDENTIALS_JSON no está definido en el entorno")
 
-        # Reparar formato si viene con comillas y saltos de línea escapados
         if cred_json.startswith('"') and cred_json.endswith('"'):
             cred_json = cred_json[1:-1]
         cred_dict = json.loads(cred_json)
@@ -30,7 +30,10 @@ def init_firebase():
 
 def agregar_detalle_estado(failed, running, scheduled):
     db = init_firebase()
-    hora_actual = datetime.now().strftime("%H:%M")
+
+    # ✅ Obtener hora local de Chile con zona horaria oficial
+    chile_tz = pytz.timezone("America/Santiago")
+    hora_actual = datetime.now(chile_tz).strftime("%H:%M")
 
     data = {
         "hora": hora_actual,
@@ -41,7 +44,7 @@ def agregar_detalle_estado(failed, running, scheduled):
 
     try:
         doc_ref = db.collection("resumenes").document(hora_actual)
-        doc_ref.set(data)  # ⬅ reemplaza si ya existe
+        doc_ref.set(data)
         print(f"📝 Registro guardado para {hora_actual}")
     except Exception as e:
         print("❌ Error al registrar en Firestore:", str(e))

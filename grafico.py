@@ -68,21 +68,25 @@ def generar_grafico_resumen_firebase():
     horas, failed, running, scheduled = agrupar_por_hora(data)
     fallos = sum(failed)
 
+    # Coordenadas centradas (00.5, 01.5, ..., 23.5)
+    x = [i + 0.5 for i in range(24)]
+    x_labels = horas  # etiquetas tipo "00:00", ..., "23:00"
+
     plt.figure(figsize=(18, 7))
 
-    plt.plot(horas, failed, label="Failed", marker='o', color='red', linewidth=2, alpha=0.9)
-    plt.plot(horas, scheduled, label="Scheduled", marker='o', color='orange', linewidth=2, alpha=0.7)
-    plt.plot(horas, running, label="Prolonged Running", marker='o', color='blue', linewidth=2, alpha=0.7)
+    plt.plot(x, failed, label="Failed", marker='o', color='red', linewidth=2, alpha=0.9)
+    plt.plot(x, scheduled, label="Scheduled", marker='o', color='orange', linewidth=2, alpha=0.7)
+    plt.plot(x, running, label="Prolonged Running", marker='o', color='blue', linewidth=2, alpha=0.7)
 
-    plt.fill_between(horas, failed, color='red', alpha=0.05)
-    plt.fill_between(horas, scheduled, color='orange', alpha=0.05)
-    plt.fill_between(horas, running, color='blue', alpha=0.05)
+    plt.fill_between(x, failed, color='red', alpha=0.05)
+    plt.fill_between(x, scheduled, color='orange', alpha=0.05)
+    plt.fill_between(x, running, color='blue', alpha=0.05)
 
     for i, val in enumerate(failed):
         if val > 0:
-            plt.scatter(horas[i], val, color='darkred', s=60, zorder=5)
+            plt.scatter(x[i], val, color='darkred', s=60, zorder=5)
 
-    plt.xticks(ticks=range(len(horas)), labels=horas, rotation=45)
+    plt.xticks(ticks=range(24), labels=x_labels, rotation=45)
 
     todos = failed + running + scheduled
     limite_y_max = max(todos) + 5 if todos else 10
@@ -102,6 +106,7 @@ def generar_grafico_resumen_firebase():
     mensaje = "📊 Resumen diario de Prefect"
     enviar_imagen_telegram(output_path, mensaje=mensaje)
     os.remove(output_path)
+
 
 if __name__ == "__main__":
     generar_grafico_resumen_firebase()
