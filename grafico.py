@@ -2,7 +2,7 @@ import os
 import json
 import matplotlib.pyplot as plt
 import requests
-import numpy as np
+from collections import defaultdict
 from datetime import datetime
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 from firebase_service import init_firebase
@@ -27,6 +27,27 @@ def enviar_imagen_telegram(imagen_path, mensaje="📊 Reporte diario de flujos")
         else:
             print("❌ Error al enviar imagen:", response.text)
 
+
+def agrupar_por_hora(data):
+    resumen_por_hora = defaultdict(lambda: {"failed": 0, "running": 0, "scheduled": 0})
+
+    for item in data:
+        if item.get("test"):
+            continue
+
+        hora_str = item.get("hora", "")
+        hora_entera = f"{hora_str.split(':')[0].zfill(2)}:00"  # "8:15" -> "08:00"
+        resumen_por_hora[hora_entera]["failed"] += item.get("failed", 0)
+        resumen_por_hora[hora_entera]["running"] += item.get("running", 0)
+        resumen_por_hora[hora_entera]["scheduled"] += item.get("scheduled", 0)
+
+    horas_ordenadas = [f"{str(h).zfill(2)}:00" for h in range(24)]
+    failed = [resumen_por_hora[h]["failed"] for h in horas_ordenadas]
+    running = [resumen_por_hora[h]["running"] for h in horas_ordenadas]
+    scheduled = [resumen_por_hora[h]["scheduled"] for h in horas_ordenadas]
+
+    return horas_ordenadas, failed, running, scheduled
+
 def generar_grafico_resumen_firebase():
     resumenes_ref = db.collection("resumenes")
     docs = resumenes_ref.stream()
@@ -37,44 +58,37 @@ def generar_grafico_resumen_firebase():
         item_id = doc.id
         if item.get("test", False):
             continue  # Ignorar si es test
-        item["hora"] = item.get("hora", item_id)  # Si no hay campo hora, usar doc.id
+        item["hora"] = item.get("hora", item_id)
         data.append(item)
 
     if not data:
         print("⚠️ No hay datos válidos en Firebase para graficar.")
         return
 
-    # Ordenar por hora
-    data.sort(key=lambda x: x["hora"])
-
-    horas = [item["hora"] for item in data]
-    failed = [max(0, item.get("failed", 0)) for item in data]
-    running = [max(0, item.get("running", 0)) for item in data]
-    scheduled = [max(0, item.get("scheduled", 0)) for item in data]
-
+    horas, failed, running, scheduled = agrupar_por_hora(data)
     fallos = sum(failed)
 
     plt.figure(figsize=(18, 7))
 
     plt.plot(horas, failed, label="Failed", marker='o', color='red', linewidth=2, alpha=0.9)
-    plt.plot(horas, running, label="Running", marker='o', color='blue', linewidth=2, alpha=0.7)
     plt.plot(horas, scheduled, label="Scheduled", marker='o', color='orange', linewidth=2, alpha=0.7)
+    plt.plot(horas, running, label="Prolonged Running", marker='o', color='blue', linewidth=2, alpha=0.7)
 
     plt.fill_between(horas, failed, color='red', alpha=0.05)
-    plt.fill_between(horas, running, color='blue', alpha=0.05)
     plt.fill_between(horas, scheduled, color='orange', alpha=0.05)
+    plt.fill_between(horas, running, color='blue', alpha=0.05)
 
     for i, val in enumerate(failed):
         if val > 0:
             plt.scatter(horas[i], val, color='darkred', s=60, zorder=5)
 
-    plt.xticks(ticks=range(0, len(horas), 2), labels=[horas[i] for i in range(0, len(horas), 2)], rotation=45)
+    plt.xticks(ticks=range(len(horas)), labels=horas, rotation=45)
 
     todos = failed + running + scheduled
     limite_y_max = max(todos) + 5 if todos else 10
     plt.ylim(bottom=0, top=limite_y_max)
 
-    plt.title(f"Resumen diario de Prefect", fontsize=14)
+    plt.title("Resumen diario de Prefect", fontsize=14)
     plt.xlabel("Hora", fontsize=12)
     plt.ylabel("Cantidad", fontsize=12)
     plt.grid(True)
@@ -85,7 +99,7 @@ def generar_grafico_resumen_firebase():
     plt.savefig(output_path)
     print(f"📊 Gráfico generado desde Firebase y guardado en {output_path}")
 
-    mensaje = f"📊 Resumen diario de Prefect"
+    mensaje = "📊 Resumen diario de Prefect"
     enviar_imagen_telegram(output_path, mensaje=mensaje)
     os.remove(output_path)
 
