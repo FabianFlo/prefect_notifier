@@ -12,15 +12,18 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 from config import PREFECT_USER, PREFECT_PASS, PREFECT_URL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from firebase_service import init_firebase, agregar_detalle_estado
 
-# Configuración
-MINUTOS_UMBRAL = 40  # solo notificar si la duración supera este valor
+db = init_firebase()
 
-# WebDriver setup
+MINUTOS_UMBRAL = 40  # Minutos para considerar running como alerta
+
 options = webdriver.ChromeOptions()
 options.add_argument('--disable-dev-shm-usage')
 options.add_argument('--no-sandbox')
-options.add_argument('--headless')  # ✅ oculto para uso en cron
+options.add_argument('--headless')
+options.add_argument('--log-level=3')
+options.add_experimental_option('excludeSwitches', ['enable-logging'])
 
 credenciales = f"{PREFECT_USER}:{PREFECT_PASS}"
 auth_base64 = base64.b64encode(credenciales.encode()).decode()
@@ -115,13 +118,15 @@ def volver_al_dashboard(driver):
 
 
 def procesar_estado(driver, estado):
+    registro_firebase = False
+
     driver.find_element(By.ID, estado).click()
     time.sleep(2)
 
     secciones = driver.find_elements(By.CLASS_NAME, "p-accordion__section")
     if not secciones:
         print("⚠ No se encontraron secciones.")
-        return
+        return False
 
     for idx, seccion in enumerate(secciones, 1):
         try:
@@ -159,46 +164,34 @@ def procesar_estado(driver, estado):
                 mensaje = f"Flujo: {nombre_flujo} > {alias_text} ({duracion})"
                 print(mensaje)
 
+                # if estado == "running":
+                #     match = re.search(r"(\d+)m", duracion)
+                #     minutos = int(match.group(1)) if match else 0
+                #     if minutos >= MINUTOS_UMBRAL:
+                #         enviar_telegram(mensaje)
+                #         registro_firebase = True  # ✅ Solo si pasa el umbral
+
+# esto hace que siempre escriba desactivar cuando se debuge
                 if estado == "running":
+                    # Si hay duración, igual extraerla (opcional para logging)
                     match = re.search(r"(\d+)m", duracion)
                     minutos = int(match.group(1)) if match else 0
-                    if minutos >= MINUTOS_UMBRAL:
-                        enviar_telegram(mensaje)
+
+                    enviar_telegram(mensaje)  # aún puedes comentar esto si no deseas notificación ahora
+                    registro_firebase = True  # ✅ Siempre registrar si hay running, sin importar duración
 
                 if estado == "failed":
                     print("🔁 Intentando retry del flujo fallido...")
                     realizar_retry(driver, alias_element)
                     volver_al_dashboard(driver)
+                    registro_firebase = True
+
+                # future: agregar casos para estado == "late"
 
             except Exception as inner_e:
                 print(f"  ⚠ Error leyendo tarjeta: {inner_e}")
 
-
-def registrar_estado_por_hora(failed, running, scheduled):
-    resumen_path = "resumen/resumen.json"
-    hora_actual = datetime.now().strftime("%H:%M")
-
-    nuevo_detalle = {
-        "hora": hora_actual,
-        "failed": failed,
-        "running": running,
-        "scheduled": scheduled
-    }
-
-    if os.path.exists(resumen_path):
-        with open(resumen_path, "r") as f:
-            resumen = json.load(f)
-    else:
-        resumen = {"ejecuciones": 0, "fallos": 0, "detalle": []}
-
-    resumen["ejecuciones"] += 1
-    resumen["fallos"] += failed
-    resumen["detalle"].append(nuevo_detalle)
-
-    with open(resumen_path, "w") as f:
-        json.dump(resumen, f, indent=2)
-
-    print("📝 Estado registrado en resumen.json")
+    return registro_firebase
 
 
 def verificar_estado_tareas():
@@ -209,22 +202,30 @@ def verificar_estado_tareas():
     try:
         resultados = contar_tareas_por_estado(driver)
 
-        # Registrar resumen por hora
-        registrar_estado_por_hora(
-            failed=resultados.get("failed", 0),
-            running=resultados.get("running", 0),
-            scheduled=resultados.get("scheduled", 0)
-        )
+        registrar = False
 
-        for estado, valor in resultados.items():
-            if valor >= 1:
-                print(f"\n➡ Entrando al detalle de: {estado.upper()}")
-                procesar_estado(driver, estado)
+        # 👉 Siempre analiza running aunque sea leve (para probar)
+        print(f"\n➡ Entrando al detalle de: RUNNING")
+        if procesar_estado(driver, "running"):
+            registrar = True
+
+        if resultados.get("failed", 0) > 0:
+            print(f"\n➡ Entrando al detalle de: FAILED")
+            if procesar_estado(driver, "failed"):
+                registrar = True
+
+        if registrar:
+            agregar_detalle_estado(
+                failed=resultados.get("failed", 0),
+                running=resultados.get("running", 0),
+                scheduled=resultados.get("scheduled", 0)
+            )
 
     except Exception as e:
         print("❌ Error general:", str(e))
     finally:
         driver.quit()
+
 
 
 if __name__ == "__main__":

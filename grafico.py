@@ -5,6 +5,9 @@ import requests
 import numpy as np
 from datetime import datetime
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from firebase_service import init_firebase
+
+db = init_firebase()
 
 def enviar_imagen_telegram(imagen_path, mensaje="📊 Reporte diario de flujos"):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
