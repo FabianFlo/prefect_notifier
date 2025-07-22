@@ -48,6 +48,21 @@ def agrupar_por_hora(data):
 
     return horas_ordenadas, failed, running, scheduled
 
+
+def borrar_resumenes_diarios():
+    resumenes_ref = db.collection("resumenes")
+    docs = resumenes_ref.stream()
+
+    eliminados = 0
+    for doc in docs:
+        data = doc.to_dict()
+        if not data.get("test", False):
+            resumenes_ref.document(doc.id).delete()
+            eliminados += 1
+
+    print(f"🧹 Se eliminaron {eliminados} documentos de la colección 'resumenes' (excepto test)")
+
+
 def generar_grafico_resumen_firebase():
     resumenes_ref = db.collection("resumenes")
     docs = resumenes_ref.stream()
@@ -106,6 +121,9 @@ def generar_grafico_resumen_firebase():
     mensaje = "📊 Resumen diario de Prefect"
     enviar_imagen_telegram(output_path, mensaje=mensaje)
     os.remove(output_path)
+
+    # 🔥 Limpiar colección resumenes (excepto test) al final del día
+    borrar_resumenes_diarios()
 
 
 if __name__ == "__main__":

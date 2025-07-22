@@ -173,21 +173,27 @@ def procesar_estado(driver, estado):
                     mensaje = f"Flujo: {nombre_flujo} > {alias_text} ({duracion})"
                     print(mensaje)
 
-                    # if estado == "running":
-                    #     match = re.search(r"(\d+)m", duracion)
-                    #     minutos = int(match.group(1)) if match else 0
-                    #     if minutos >= MINUTOS_UMBRAL:
-                    #         enviar_telegram(mensaje)
-                    #         registro_firebase = True  # ✅ Solo si pasa el umbral
+                    if estado == "running":
+                        match_h = re.search(r"(\d+)h", duracion)
+                        match_m = re.search(r"(\d+)m", duracion)                    
+
+                        horas = int(match_h.group(1)) if match_h else 0
+                        minutos = int(match_m.group(1)) if match_m else 0
+                        duracion_total_min = horas * 60 + minutos                   
+
+                        if duracion_total_min >= MINUTOS_UMBRAL:
+                            enviar_telegram(mensaje)
+                            registro_firebase = True  # ✅ Solo si pasa el umbral                   
+
 
                     # esto hace que siempre escriba desactivar cuando se debuge
-                    if estado == "running":
-                        # Si hay duración, igual extraerla (opcional para logging)
-                        match = re.search(r"(\d+)m", duracion)
-                        minutos = int(match.group(1)) if match else 0
+                    # if estado == "running":
+                    #     # Si hay duración, igual extraerla (opcional para logging)
+                    #     match = re.search(r"(\d+)m", duracion)
+                    #     minutos = int(match.group(1)) if match else 0
 
-                        enviar_telegram(mensaje)  # aún puedes comentar esto si no deseas notificación ahora
-                        registro_firebase = True  # ✅ Siempre registrar si hay running, sin importar duración
+                    #     enviar_telegram(mensaje)  # aún puedes comentar esto si no deseas notificación ahora
+                    #     registro_firebase = True  # ✅ Siempre registrar si hay running, sin importar duración
 
                     if estado == "failed":
                         print("🔁 Intentando retry del flujo fallido...")
