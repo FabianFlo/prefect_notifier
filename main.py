@@ -4,7 +4,6 @@ import requests
 import base64
 import re
 import time
-from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
@@ -16,7 +15,7 @@ from firebase_service import init_firebase, agregar_detalle_estado
 
 db = init_firebase()
 
-MINUTOS_UMBRAL = 40  # Minutos para considerar running como alerta
+MINUTOS_UMBRAL = 40
 
 options = webdriver.ChromeOptions()
 options.add_argument('--disable-dev-shm-usage')
@@ -33,13 +32,8 @@ def enviar_telegram(mensaje):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("⚠️ TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados")
         return
-
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    data = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": mensaje
-    }
-
+    data = { "chat_id": TELEGRAM_CHAT_ID, "text": mensaje }
     try:
         response = requests.post(url, data=data)
         if response.status_code == 200:
@@ -55,9 +49,7 @@ def setup_driver():
     driver = webdriver.Chrome(service=service, options=options)
     driver.execute_cdp_cmd("Network.enable", {})
     driver.execute_cdp_cmd("Network.setExtraHTTPHeaders", {
-        "headers": {
-            "Authorization": f"Basic {auth_base64}"
-        }
+        "headers": {"Authorization": f"Basic {auth_base64}"}
     })
     return driver
 
@@ -83,14 +75,12 @@ def realizar_retry(driver, alias_element):
     alias_element.click()
     WebDriverWait(driver, 15).until(EC.url_contains("/flow-run/"))
     print("✅ Página de detalle cargada.")
-
     retry_btn = WebDriverWait(driver, 15).until(
         EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Retry')]"))
     )
     time.sleep(1)
     retry_btn.click()
     print("🟡 Se hizo clic en Retry principal")
-
     try:
         modal_retry_btn = WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((By.XPATH,
@@ -118,8 +108,7 @@ def volver_al_dashboard(driver):
 
 
 def procesar_estado(driver, estado):
-    registro_firebase = False
-
+    alerta_detectada = False
     driver.find_element(By.ID, estado).click()
     time.sleep(2)
 
@@ -131,7 +120,7 @@ def procesar_estado(driver, estado):
     for idx, _ in enumerate(secciones, 1):
         try:
             secciones_actualizadas = driver.find_elements(By.CLASS_NAME, "p-accordion__section")
-            seccion = secciones_actualizadas[idx - 1]  # índice base 0
+            seccion = secciones_actualizadas[idx - 1]
             boton = seccion.find_element(By.TAG_NAME, "button")
             boton.click()
             print(f"🔽 Sección {idx} expandida")
@@ -153,7 +142,7 @@ def procesar_estado(driver, estado):
             continue
 
         for idx_t in range(len(tarjetas)):
-            for intento in range(2):  # 1 intento + 1 retry por stale element
+            for intento in range(2):
                 try:
                     secciones_actualizadas = driver.find_elements(By.CLASS_NAME, "p-accordion__section")
                     seccion = secciones_actualizadas[idx - 1]
@@ -173,43 +162,29 @@ def procesar_estado(driver, estado):
                     mensaje = f"Flujo: {nombre_flujo} > {alias_text} ({duracion})"
                     print(mensaje)
 
-                    if estado == "running":
+                    if estado == "running" and not alerta_detectada:
                         match_h = re.search(r"(\d+)h", duracion)
-                        match_m = re.search(r"(\d+)m", duracion)                    
-
+                        match_m = re.search(r"(\d+)m", duracion)
                         horas = int(match_h.group(1)) if match_h else 0
                         minutos = int(match_m.group(1)) if match_m else 0
-                        duracion_total_min = horas * 60 + minutos                   
-
+                        duracion_total_min = horas * 60 + minutos
                         if duracion_total_min >= MINUTOS_UMBRAL:
                             enviar_telegram(mensaje)
-                            registro_firebase = True  # ✅ Solo si pasa el umbral                   
-
-
-                    # esto hace que siempre escriba desactivar cuando se debuge
-                    # if estado == "running":
-                    #     # Si hay duración, igual extraerla (opcional para logging)
-                    #     match = re.search(r"(\d+)m", duracion)
-                    #     minutos = int(match.group(1)) if match else 0
-
-                    #     enviar_telegram(mensaje)  # aún puedes comentar esto si no deseas notificación ahora
-                    #     registro_firebase = True  # ✅ Siempre registrar si hay running, sin importar duración
+                            alerta_detectada = True  # solo cuenta una vez
 
                     if estado == "failed":
                         print("🔁 Intentando retry del flujo fallido...")
                         realizar_retry(driver, alias_element)
                         volver_al_dashboard(driver)
-                        registro_firebase = True
+                        alerta_detectada = True
 
-                    # future: agregar casos para estado == "late"
-
-                    break  # si todo fue bien, salimos del retry
+                    break
                 except Exception as inner_e:
                     print(f"  ⚠ Error leyendo tarjeta (intento {intento + 1}): {inner_e}")
                     if intento == 1:
-                        continue  # último intento, ya no se reintenta
+                        continue
+    return alerta_detectada
 
-    return registro_firebase
 
 def verificar_estado_tareas():
     driver = setup_driver()
@@ -219,22 +194,22 @@ def verificar_estado_tareas():
     try:
         resultados = contar_tareas_por_estado(driver)
 
-        registrar = False
+        running_alert = False
+        failed_alert = False
 
-        # 👉 Siempre analiza running aunque sea leve (para probar)
         print(f"\n➡ Entrando al detalle de: RUNNING")
         if procesar_estado(driver, "running"):
-            registrar = True
+            running_alert = True
 
         if resultados.get("failed", 0) > 0:
             print(f"\n➡ Entrando al detalle de: FAILED")
             if procesar_estado(driver, "failed"):
-                registrar = True
+                failed_alert = True
 
-        if registrar:
+        if running_alert or failed_alert:
             agregar_detalle_estado(
-                failed=resultados.get("failed", 0),
-                running=resultados.get("running", 0),
+                failed=resultados.get("failed", 0) if failed_alert else 0,
+                running=1 if running_alert else 0,
                 scheduled=resultados.get("scheduled", 0)
             )
 
@@ -242,6 +217,7 @@ def verificar_estado_tareas():
         print("❌ Error general:", str(e))
     finally:
         driver.quit()
+
 
 if __name__ == "__main__":
     verificar_estado_tareas()
