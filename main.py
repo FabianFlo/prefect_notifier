@@ -12,10 +12,16 @@ from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 from config import PREFECT_USER, PREFECT_PASS, PREFECT_URL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 from firebase_service import init_firebase, agregar_detalle_estado
+from selenium.common.exceptions import (TimeoutException,
+    ElementClickInterceptedException,
+    ElementNotInteractableException,
+    StaleElementReferenceException)
+
 
 db = init_firebase()
 
-MINUTOS_UMBRAL = 40
+MINUTOS_UMBRAL_RUNNING = 15
+
 
 options = webdriver.ChromeOptions()
 options.add_argument('--disable-dev-shm-usage')
@@ -71,27 +77,62 @@ def contar_tareas_por_estado(driver):
     return resultados
 
 
-def realizar_retry(driver, alias_element):
-    alias_element.click()
-    WebDriverWait(driver, 15).until(EC.url_contains("/flow-run/"))
-    print("✅ Página de detalle cargada.")
-    retry_btn = WebDriverWait(driver, 15).until(
-        EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Retry')]"))
-    )
-    time.sleep(1)
-    retry_btn.click()
-    print("🟡 Se hizo clic en Retry principal")
-    try:
-        modal_retry_btn = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH,
-                "//div[contains(@class, 'p-modal__footer')]//button[contains(@class, 'p-button--primary') and .//div[text()[contains(., 'Retry')]]]"
-            ))
-        )
-        time.sleep(1)
-        modal_retry_btn.click()
-        print("✅ Retry confirmado en el modal.")
-    except Exception as modal_e:
-        print("❌ No se pudo confirmar Retry en el modal:", str(modal_e))
+def realizar_retry(driver, alias_element, max_reintentos=3):
+    alias_href = alias_element.get_attribute("href")
+    if not alias_href:
+        print("❌ No se pudo obtener href del alias")
+        return
+
+    for intento in range(max_reintentos):
+        try:
+            print(f"🌐 Redirigiendo a detalle con: {alias_href}")
+            driver.get(alias_href)
+            WebDriverWait(driver, 15).until(EC.url_contains("/flow-run/"))
+            print("✅ Página de detalle cargada.")
+            break
+        except Exception as e:
+            print(f"❌ Error al abrir el detalle del flujo (intento {intento + 1}): {e}")
+            if intento == max_reintentos - 1:
+                print("❌ No se pudo abrir el detalle tras varios intentos.")
+                return
+            time.sleep(2)
+
+    # Retry principal
+    for intento in range(max_reintentos):
+        try:
+            retry_btn = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Retry')]"))
+            )
+            time.sleep(1)
+            retry_btn.click()
+            print("🟡 Se hizo clic en Retry principal")
+            break
+        except Exception as e:
+            print(f"  ⚠ Retry principal no clickeable (intento {intento + 1}): {e}")
+            if intento == max_reintentos - 1:
+                print("❌ No se pudo hacer clic en el botón Retry principal")
+                return
+            time.sleep(2)
+
+    # Modal de confirmación
+    for intento in range(max_reintentos):
+        try:
+            modal_retry_btn = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH,
+                    "//div[contains(@class, 'p-modal__footer')]//button[contains(@class, 'p-button--primary') and .//div[text()[contains(., 'Retry')]]]"
+                ))
+            )
+            time.sleep(1)
+            modal_retry_btn.click()
+            print("✅ Retry confirmado en el modal.")
+            return
+        except Exception as e:
+            print(f"  ⚠ Modal Retry no clickeable (intento {intento + 1}): {e}")
+            if intento == max_reintentos - 1:
+                print("❌ No se pudo confirmar Retry en el modal")
+                return
+            time.sleep(2)
+
 
 
 def volver_al_dashboard(driver):
@@ -107,46 +148,70 @@ def volver_al_dashboard(driver):
         print("⚠ No se pudo volver al dashboard.")
 
 
+
 def procesar_estado(driver, estado):
     alerta_detectada = False
     driver.find_element(By.ID, estado).click()
     time.sleep(2)
 
-    secciones = driver.find_elements(By.CLASS_NAME, "p-accordion__section")
-    if not secciones:
-        print("⚠ No se encontraron secciones.")
-        return False
+    idx_seccion = 0
+    while True:
+        secciones = driver.find_elements(By.CLASS_NAME, "p-accordion__section")
+        if idx_seccion >= len(secciones):
+            break  # no hay más secciones
 
-    for idx, _ in enumerate(secciones, 1):
+        for intento_expandir in range(2):
+            try:
+                secciones_actualizadas = driver.find_elements(By.CLASS_NAME, "p-accordion__section")
+                if idx_seccion >= len(secciones_actualizadas):
+                    raise IndexError("Sección fuera de rango")
+                seccion = secciones_actualizadas[idx_seccion]
+
+                boton = seccion.find_element(By.TAG_NAME, "button")
+                boton.click()
+                print(f"🔽 Sección {idx_seccion + 1} expandida")
+
+                WebDriverWait(seccion, 5).until(
+                    EC.presence_of_element_located((By.CLASS_NAME, "state-list-item__content"))
+                )
+                break
+            except Exception as e:
+                print(f"⚠ Intento {intento_expandir + 1} falló expandiendo sección {idx_seccion + 1}: {e}")
+                if intento_expandir == 1:
+                    print(f"⚠ No se pudo expandir sección {idx_seccion + 1}")
+                    idx_seccion += 1
+                    continue
+
         try:
             secciones_actualizadas = driver.find_elements(By.CLASS_NAME, "p-accordion__section")
-            seccion = secciones_actualizadas[idx - 1]
-            boton = seccion.find_element(By.TAG_NAME, "button")
-            boton.click()
-            print(f"🔽 Sección {idx} expandida")
-        except:
-            print(f"⚠ No se pudo expandir sección {idx}")
+            if idx_seccion >= len(secciones_actualizadas):
+                raise IndexError("Sección fuera de rango")
+            seccion = secciones_actualizadas[idx_seccion]
+            tarjetas = seccion.find_elements(By.CLASS_NAME, "state-list-item__content")
+        except Exception as e:
+            print(f"⚠ Error obteniendo tarjetas en sección {idx_seccion + 1}: {e}")
+            idx_seccion += 1
             continue
 
-        try:
-            WebDriverWait(seccion, 5).until(
-                EC.presence_of_element_located((By.CLASS_NAME, "state-list-item__content"))
-            )
-        except:
-            print(f"⚠ Sección {idx} no contiene tarjetas visibles.")
-            continue
-
-        tarjetas = seccion.find_elements(By.CLASS_NAME, "state-list-item__content")
         if not tarjetas:
-            print(f"⚠ Sección {idx} sin tarjetas luego del wait.")
+            print(f"⚠ Sección {idx_seccion + 1} sin tarjetas.")
+            idx_seccion += 1
             continue
 
-        for idx_t in range(len(tarjetas)):
-            for intento in range(2):
+        idx_t = 0
+        while idx_t < len(tarjetas):
+            for intento_tarjeta in range(2):
                 try:
                     secciones_actualizadas = driver.find_elements(By.CLASS_NAME, "p-accordion__section")
-                    seccion = secciones_actualizadas[idx - 1]
+                    if idx_seccion >= len(secciones_actualizadas):
+                        raise IndexError("Sección fuera de rango")
+
+                    seccion = secciones_actualizadas[idx_seccion]
                     tarjetas_actualizadas = seccion.find_elements(By.CLASS_NAME, "state-list-item__content")
+                    if idx_t >= len(tarjetas_actualizadas):
+                        print(f"⚠ Índice {idx_t} fuera de rango en tarjetas actualizadas.")
+                        break
+
                     tarjeta = tarjetas_actualizadas[idx_t]
 
                     nombre_flujo = tarjeta.find_element(By.CLASS_NAME, "flow-run-bread-crumbs__flow-link").text.strip()
@@ -162,28 +227,60 @@ def procesar_estado(driver, estado):
                     mensaje = f"Flujo: {nombre_flujo} > {alias_text} ({duracion})"
                     print(mensaje)
 
+                    # 🚨 alerta para RUNNING prolongado
                     if estado == "running" and not alerta_detectada:
                         match_h = re.search(r"(\d+)h", duracion)
                         match_m = re.search(r"(\d+)m", duracion)
                         horas = int(match_h.group(1)) if match_h else 0
                         minutos = int(match_m.group(1)) if match_m else 0
                         duracion_total_min = horas * 60 + minutos
-                        if duracion_total_min >= MINUTOS_UMBRAL:
+                        if duracion_total_min >= MINUTOS_UMBRAL_RUNNING:
                             enviar_telegram(mensaje)
-                            alerta_detectada = True  # solo cuenta una vez
+                            alerta_detectada = True
 
+                    # 🔁 retry para FALLIDOS
                     if estado == "failed":
                         print("🔁 Intentando retry del flujo fallido...")
                         realizar_retry(driver, alias_element)
                         volver_al_dashboard(driver)
+
+                        # ⏪ Reingresar a pestaña failed y expandir sección actual
+                        driver.find_element(By.ID, estado).click()
+                        time.sleep(2)
+
+                        secciones = driver.find_elements(By.CLASS_NAME, "p-accordion__section")
+                        if idx_seccion < len(secciones):
+                            try:
+                                boton = secciones[idx_seccion].find_element(By.TAG_NAME, "button")
+                                boton.click()
+                                print(f"🔽 Reexpandida sección {idx_seccion + 1} tras retry")
+                                WebDriverWait(secciones[idx_seccion], 5).until(
+                                    EC.presence_of_element_located((By.CLASS_NAME, "state-list-item__content"))
+                                )
+                            except Exception as e:
+                                print(f"⚠ No se pudo reexpandir sección tras retry: {e}")
+
                         alerta_detectada = True
 
-                    break
-                except Exception as inner_e:
-                    print(f"  ⚠ Error leyendo tarjeta (intento {intento + 1}): {inner_e}")
-                    if intento == 1:
+                        # ⚠ Recargar tarjetas luego del reload
+                        tarjetas = secciones[idx_seccion].find_elements(By.CLASS_NAME, "state-list-item__content")
+                        idx_t += 1
+                        break  # salir del intento_tarjeta
+
+                    break  # tarjeta procesada correctamente
+                except StaleElementReferenceException as se:
+                    print(f"  ⚠ Stale element en tarjeta {idx_t + 1} (intento {intento_tarjeta + 1}): {se}")
+                except Exception as e:
+                    print(f"  ⚠ Error leyendo tarjeta {idx_t + 1} (intento {intento_tarjeta + 1}): {e}")
+                    if intento_tarjeta == 1:
                         continue
+
+            idx_t += 1
+
+        idx_seccion += 1
+
     return alerta_detectada
+
 
 
 def verificar_estado_tareas():
