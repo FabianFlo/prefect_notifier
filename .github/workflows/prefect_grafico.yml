@@ -1,8 +1,8 @@
 name: Prefect Grafico
 
 on:
-  #schedule:
-  #  - cron: '0 2 * * *'  # 22:00 Chile (UTC-4)
+  schedule:
+    - cron: '0 2 * * *'  # 22:00 Chile (UTC-4)
   workflow_dispatch:
 
 jobs:
